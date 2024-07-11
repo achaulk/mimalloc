@@ -178,32 +178,16 @@ int _mi_prim_free(void* addr, size_t size ) {
 //---------------------------------------------
 
 static void* win_virtual_alloc_prim_once(void* addr, size_t size, size_t try_alignment, DWORD flags) {
-  #if (MI_INTPTR_SIZE >= 8)
-  // on 64-bit systems, try to use the virtual address area after 2TiB for 4MiB aligned allocations
-  if (addr == NULL) {
-    void* hint = _mi_os_get_aligned_hint(try_alignment,size);
-    if (hint != NULL) {
-      void* p = VirtualAlloc(hint, size, flags, PAGE_READWRITE);
-      if (p != NULL) return p;
-      _mi_verbose_message("warning: unable to allocate hinted aligned OS memory (%zu bytes, error code: 0x%x, address: %p, alignment: %zu, flags: 0x%x)\n", size, GetLastError(), hint, try_alignment, flags);
-      // fall through on error
-    }
-  }
-  #endif
-  // on modern Windows try use VirtualAlloc2 for aligned allocation
-  if (try_alignment > 1 && (try_alignment % _mi_os_page_size()) == 0 && pVirtualAlloc2 != NULL) {
-    MI_MEM_ADDRESS_REQUIREMENTS reqs = { 0, 0, 0 };
-    reqs.Alignment = try_alignment;
-    MI_MEM_EXTENDED_PARAMETER param = { {0, 0}, {0} };
-    param.Type.Type = MiMemExtendedParameterAddressRequirements;
-    param.Arg.Pointer = &reqs;
-    void* p = (*pVirtualAlloc2)(GetCurrentProcess(), addr, size, flags, PAGE_READWRITE, &param, 1);
-    if (p != NULL) return p;
-    _mi_warning_message("unable to allocate aligned OS memory (0x%zx bytes, error code: 0x%x, address: %p, alignment: 0x%zx, flags: 0x%x)\n", size, GetLastError(), addr, try_alignment, flags);
-    // fall through on error
-  }
-  // last resort
-  return VirtualAlloc(addr, size, flags, PAGE_READWRITE);
+  MI_MEM_ADDRESS_REQUIREMENTS reqs = { 0, 0, 0 };
+  reqs.Alignment = try_alignment;
+  reqs.HighestEndingAddress = (PVOID)((1ull << 35) - 1);
+  MI_MEM_EXTENDED_PARAMETER param = { {0, 0}, {0} };
+  param.Type.Type = MiMemExtendedParameterAddressRequirements;
+  param.Arg.Pointer = &reqs;
+  void *p = (*pVirtualAlloc2)(GetCurrentProcess(), addr, size, flags, PAGE_READWRITE, &param, 1);
+  if (p != NULL) return p;
+  _mi_warning_message("unable to allocate aligned OS memory (%zu bytes, error code: 0x%x, address: %p, alignment: %zu, flags: 0x%x)\n", size, GetLastError(), addr, try_alignment, flags);
+  return NULL;
 }
 
 static bool win_is_out_of_memory_error(DWORD err) {
